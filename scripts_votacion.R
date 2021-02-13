@@ -1,6 +1,7 @@
 library(tidyverse)
 library(RSelenium)
 library(rvest)
+library(tidytext)
 
 
 
@@ -117,6 +118,8 @@ links2 <- tabla$getElementAttribute("outerHTML")[[1]] %>%
 links <- c(links1, links2)
 
 remote_driver$close()
+remote_driver$closeServer()
+remote_driver$closeall()
 
 rm(links1, links2, driver, remote_driver, tabla)
 
@@ -196,6 +199,13 @@ write.table(votacion, "votacion.csv", sep = ";", row.names = F)
 consolidado <- votacion %>%
   left_join(base_diputados, by = "nombre") 
 
+# hay que pitearse filas que están demás que marcan el nombre con "NA NA"
+# Es un poco largo de explicar, pero el placeholder de las votaciones tiene
+# una tabla con 3 columnas por defecto, la wea es que si traigo la tabla, y
+# hay un solo voto, las otras dos columna se llenan con NA
+consolidado <- consolidado[-c(which(consolidado$nombre=="NA NA")),]
+
+
 # pasamos las siglas pa que sea más fácil de manejar
 partidos <- unique(consolidado$partido)
 siglas <- c(
@@ -218,8 +228,15 @@ consolidado$coalicion <- case_when(
     consolidado$siglas %in% c("RD", "PCS", "COMUNES", "PL", "PH") ~ "FA",
     consolidado$siglas %in% c("UDI", "RN", "EVOPOLI") ~ "ChV",
     consolidado$siglas %in% c("PS", "PRSD", "PDC", "PPD") ~ "Concerta",
+    consolidado$siglas == "PC" ~ "PC",
     T ~ "Otros"
   )
+
+# una última limpieza es que asignamos un código a cada votación extrayendolo
+# del link
+
+consolidado$id_votacion <- consolidado$link %>% 
+  str_extract("[[:digit:]]+")
 
 # y estamos listos para graficar!
 
@@ -227,6 +244,33 @@ write.table(consolidado, "consolidado partidos.csv", sep = ";", row.names = F)
 rm(base_diputados, votacion, format_names, part_siglas)
 
 # =========== ANALIZANDO ================
+
+resumen <- consolidado %>%
+  group_by(id_votacion, coalicion) %>%
+  summarize(total_votaciones = n(), 
+            a_favor = sum(votacion == "A favor")) %>%
+  mutate(p.favor = a_favor/total_votaciones)
+
+ggplot(resumen, aes(reorder_within(coalicion, p.favor, id_votacion), 
+                    p.favor, fill = coalicion)) +
+  theme_classic() +
+  geom_col() +
+  scale_x_reordered() +
+  coord_flip() +
+  facet_wrap(.~id_votacion, scales = "free_y") +
+  scale_y_continuous(labels = scales::percent) +
+  theme(legend.position = "none",
+        axis.text.x = element_text(angle = 90)) +
+  labs(title = "Nivel de apoyo a artículos de ley antibarricadas",
+       subtitle ="% de voto \"a favor\" de coalición/partido",
+       x="", y="", caption = "Números indican id de artículo \nExtraído de página de la cámara de diputados")
+
+
+
+
+
+
+
 
 
 
