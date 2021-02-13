@@ -245,19 +245,28 @@ rm(base_diputados, votacion, format_names, part_siglas)
 
 # =========== ANALIZANDO ================
 
+library(tidyverse)
+library(ggfortify)
+library(cluster)
+library(patchwork)
+theme_set(theme_classic())
+
+# codigo de votación de aprobación de legislar 32195
+
 resumen <- consolidado %>%
   group_by(id_votacion, coalicion) %>%
   summarize(total_votaciones = n(), 
             a_favor = sum(votacion == "A favor")) %>%
   mutate(p.favor = a_favor/total_votaciones)
 
-ggplot(resumen, aes(reorder_within(coalicion, p.favor, id_votacion), 
+resumen$id_votacion[resumen$id_votacion == 32195] <- "A favor de legislar"
+
+g1 <- ggplot(resumen, aes(reorder_within(coalicion, p.favor, id_votacion), 
                     p.favor, fill = coalicion)) +
-  theme_classic() +
   geom_col() +
   scale_x_reordered() +
   coord_flip() +
-  facet_wrap(.~id_votacion, scales = "free_y") +
+  facet_wrap(.~fct_rev(id_votacion), scales = "free_y") +
   scale_y_continuous(labels = scales::percent) +
   theme(legend.position = "none",
         axis.text.x = element_text(angle = 90)) +
@@ -267,8 +276,73 @@ ggplot(resumen, aes(reorder_within(coalicion, p.favor, id_votacion),
 
 
 
+ggsave("gráfico 1.png", g1, device="png", width = 10, height = 5, limitsize = F)
 
 
+# OTRA GRÁFICA
+resumen$coalicion <- as.factor(resumen$coalicion)
+
+resumen$coalicion <- factor(resumen$coalicion,
+                            levels(resumen$coalicion)[c(1:3, 5, 4)])
+
+
+ggplot(resumen, aes(p.favor, fill = coalicion, color = coalicion)) +
+  facet_wrap(.~coalicion) +
+  geom_histogram() +
+  scale_x_continuous(labels = scales::percent) +
+  scale_color_viridis_d() + 
+  scale_fill_viridis_d() +
+  theme(legend.position = "none") +
+  labs(x= "", y = "", title = "Apoyo a artículos de la ley antibarricadas",
+       subtitle = "Recuento de porcentajes de apoyo por cada artículo de la ley por partido/coalición")
+
+
+# ANÁLISIS POR KMEANS
+# Recodificando votacion, separando votaciones en
+# diferentes variables, renombrandolas y
+# cambiando el formato a lo ancho
+consolidado <- consolidado %>% 
+  mutate(voto = case_when(votacion == 'A favor' ~ 1,
+                          votacion == 'En contra' ~ -1,
+                          TRUE ~ 0),
+         id_votacion = paste('id_', id_votacion, sep = '')) %>% 
+  select(-link, -partido, -votacion)
+
+# Esto es para usar en otra idea
+consolidado_w <- consolidado %>% 
+  pivot_wider(names_from = id_votacion, values_from = voto)
+
+# Promedios de votacion y grafico simple
+resumen <- consolidado %>%
+  group_by(id_votacion, siglas) %>%
+  summarize(total_votaciones = n(), 
+            a_favor = sum(voto == 1)) %>%
+  mutate(p_favor = a_favor/total_votaciones)
+
+# Cambiando a ancho
+resumen_w <- resumen %>% 
+  select(-total_votaciones, -a_favor) %>% 
+  pivot_wider(names_from = id_votacion, values_from = p_favor)
+
+# Data matrix y Componentes Principales
+dat_mat <- as.matrix(resumen_w[, 2:ncol(resumen_w)])
+rownames(dat_mat) <- resumen_w$siglas
+
+# obteniendo clusters
+kmeans_3 <- kmeans(dat_mat, 3)
+kmeans_4 <- kmeans(dat_mat, 4)
+
+# graficando clusters
+g2 <- autoplot(kmeans_3,  data = resumen_w, frame= T, label= T, size = -1) + 
+  theme(legend.position = "none") +
+  labs(subtitle = "3 clusters") +
+  autoplot(kmeans_4,  data = resumen_w, frame= T, label= T, size = -1) + 
+  theme(legend.position = "none") +
+  labs(subtitle = "4 clusters") +
+  plot_annotation(title = "Aglomeración por k-means")
+
+
+ggsave("gráfico 2.png", g2, device="png", width = 10, height = 5, limitsize = F)
 
 
 
